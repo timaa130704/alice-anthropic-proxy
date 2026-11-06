@@ -1,0 +1,26 @@
+{
+  "name": "alice-anthropic-proxy",
+  "version": "1.0.0",
+  "description": "Anthropic-compatible API in front of Yandex Alice AI web (uniproxy) chat",
+  "main": "src/index.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node tools/test-parse.js && node tools/test-compat.js && node tools/test-multiturn.js",
+    "test:http": "node tools/test-http.js",
+    "test:stream": "node tools/test-http.js --stream",
+    "frames": "node tools/probe4.js"
+  },
+  "keywords": [
+    "yandex",
+    "alice",
+    "anthropic",
+    "claude-code",
+    "uniproxy",
+    "proxy"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
