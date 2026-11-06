@@ -16,6 +16,10 @@ const cases = [
     '```json\n<tool_use>\n{"name":"Write",\n"input":{"file_path":"C:\\\\Users\\\\zeiss\\\\probe.txt",\n"content":""}\n</tool_use>\n```',
   ],
   ['висячая запятая', '{"name":"Write","input":{"file_path":"a.txt",},}'],
+  [
+    'экранированные скобки',
+    '<tool_use>{"name":"Write","input":{"file_path":"\\/path\\/to\\/website.html","content":"\\<html\\>\\n\\<body\\>\\n\\<p\\>хуй\\n\\<\\/body\\>\\n\\<\\/html\\>"}}</tool_use>',
+  ],
 ];
 
 for (const [label, text] of cases) {

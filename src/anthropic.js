@@ -67,6 +67,7 @@ const TOOL_HEADER = `Ты — исполнитель в CLI-окружении �
 <tool_use>{"name":"имя_действия","input":{...}}</tool_use>
 
 Строго валидный JSON: двойные кавычки, без комментариев, без markdown-заборов, без текста вокруг.
+Экранируй только то, что требует JSON. Не экранируй `<`, `>` и обычные символы. Пути к файлам пиши как есть, обычно относительные от текущей папки.
 Если действие не нужно (обычный вопрос, объяснение, болтовня) — просто отвечай текстом, инструменты не вызывай. Не выдумывай ссылки и содержимое файлов.
 
 Доступные действия:
@@ -198,9 +199,37 @@ function cleanBefore(text) {
     .trim();
 }
 
+/** Модель любит экранировать всё подряд: \<html\>, \' и т.п. — в JSON такого эскейпа нет. */
+function stripBadEscapes(s) {
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch !== '\\') {
+      out += ch;
+      continue;
+    }
+    const next = s[i + 1];
+    if (next === undefined) continue;
+    if ('"\\/bfnrt'.includes(next)) {
+      out += ch + next;
+      i++;
+      continue;
+    }
+    if (next === 'u' && /^[0-9a-fA-F]{4}$/.test(s.slice(i + 2, i + 6))) {
+      out += s.slice(i, i + 6);
+      i += 5;
+      continue;
+    }
+    // мусорный эскейп — выбрасываем только сам слэш
+    out += next;
+    i++;
+  }
+  return out;
+}
+
 /** Достраиваем незакрытые скобки/кавычки — слабая модель часто забывает хвост. */
 function repairJson(src) {
-  const s = String(src)
+  const s = stripBadEscapes(String(src))
     .replace(/,\s*([}\]])/g, '$1')
     .replace(/\s+$/, '');
   const stack = [];
