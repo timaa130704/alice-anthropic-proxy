@@ -10,7 +10,6 @@
     "test": "node tools/test-parse.js && node tools/test-compat.js && node tools/test-multiturn.js",
     "test:http": "node tools/test-http.js",
     "test:stream": "node tools/test-http.js --stream",
-    "bot": "node bot/telegram.js",
     "frames": "node tools/probe4.js"
   },
   "keywords": [
