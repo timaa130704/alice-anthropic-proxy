@@ -121,7 +121,24 @@ const config = {
   // инструменты, которые бесполезны без реального агента и только сбивают слабую модель
   toolDeny: (
     process.env.TOOL_DENY ||
-    'Agent,Task,Workflow,ExitPlanMode,AskUserQuestion,TodoWrite,WebSearch,WebFetch,NotebookEdit'
+    [
+      'Agent',
+      'Task',
+      'Workflow',
+      'ExitPlanMode',
+      'AskUserQuestion',
+      'TodoWrite',
+      'WebSearch',
+      'WebFetch',
+      'NotebookEdit',
+      'ListAgents',
+      'SendMessage',
+      'ReportFindings',
+      'ScheduleWakeup',
+      'Skill',
+      'ToolSearch',
+      'DeferredToolPlaceholder',
+    ].join(',')
   )
     .split(',')
     .map((s) => s.trim())

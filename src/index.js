@@ -114,16 +114,62 @@ async function handleMessages(req, res) {
   }
 
   log(
-    `-> /v1/messages model=${model} stream=${stream} chars=${prompt.length} tools=${tools.length}`
+    `-> /v1/messages model=${model} stream=${stream} chars=${prompt.length} tools=${tools.length} [${
+      toolNames.join(',') || '-'
+    }]`
   );
   const started = Date.now();
 
+  const FILE_LINK = /get_source_file\?FileGuid=([0-9a-f-]{8,})/i;
+
+  /** Достаём Write из ответа, если Алиса нарисовала html текстом вместо вызова. */
+  function synthWriteFromAnswer(answer) {
+    if (!toolNames.includes('Write')) return null;
+    const lastUser = [...(Array.isArray(body.messages) ? body.messages : [])]
+      .reverse()
+      .find((m) => m && m.role === 'user');
+    const name = A.guessFileName(A.contentToText(lastUser?.content)) || 'index.html';
+    const art = A.extractHtmlArtifact(answer, name);
+    return art ? { before: '', name: 'Write', input: art } : null;
+  }
+
+  /** Спрашиваем Алису; если вызов оборван или она сгенерила файл у себя — правим и повторяем. */
+  async function askUntilComplete() {
+    let answer = await alice.ask(prompt);
+    if (!emulateTools) return answer;
+
+    for (let round = 1; round <= 2; round++) {
+      if (synthWriteFromAnswer(answer) || A.parseToolCall(answer, toolNames)) break;
+      const link = FILE_LINK.test(answer);
+      const truncated = /<tool_use>/i.test(answer);
+      const halfHtml = /<html[\s>]|<!DOCTYPE html/i.test(answer) && !/<\/html>/i.test(answer);
+      if (!link && !truncated && !halfHtml) break;
+
+      let note;
+      if (link) {
+        note =
+          'Ты не создаёшь файлы на своей стороне и не даёшь ссылок на них. Верни РОВНО один блок <tool_use>{"name":"Write","input":{"file_path":"index.html","content":"...весь html целиком..."}}</tool_use> и ничего больше.';
+      }
+
+      log(
+        `   правка ${round}/4: ${
+          link ? 'ссылка на файл вместо вызова' : halfHtml ? 'недописанный html' : 'обрыв вызова'
+        }`
+      );
+      const fixed = await alice.ask(A.buildContinuation({ ...body, tools }, link ? '' : answer, note));
+      if (!fixed || !fixed.trim()) break;
+      answer = link ? fixed : A.joinContinuation(answer, fixed);
+    }
+
+    return answer;
+  }
+
   if (!stream) {
     try {
-      const answer = await alice.ask(prompt);
+      const answer = await askUntilComplete();
       log(`<- done in ${Date.now() - started}ms chars=${answer.length}`);
       if (emulateTools) {
-        const call = A.parseToolCall(answer, toolNames);
+        const call = synthWriteFromAnswer(answer) || A.parseToolCall(answer, toolNames);
         if (call) return json(res, 200, A.buildToolMessage({ model, call }));
       }
       return json(res, 200, A.buildMessage({ model, text: answer }));
@@ -151,9 +197,9 @@ async function handleMessages(req, res) {
   if (emulateTools) {
     // инструменты требуют валидного JSON целиком — копим и отдаём в конце
     try {
-      const answer = await alice.ask(prompt);
+      const answer = await askUntilComplete();
       log(`<- done in ${Date.now() - started}ms chars=${answer.length}`);
-      const call = A.parseToolCall(answer, toolNames);
+      const call = synthWriteFromAnswer(answer) || A.parseToolCall(answer, toolNames);
       if (call) {
         log(`   tool_use: ${call.name} ${JSON.stringify(call.input).slice(0, 200)}`);
         if (call.before) sse.textDelta(call.before);

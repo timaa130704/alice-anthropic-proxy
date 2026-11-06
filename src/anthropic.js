@@ -68,6 +68,9 @@ const TOOL_HEADER = `Ты — исполнитель в CLI-окружении �
 
 Строго валидный JSON: двойные кавычки, без комментариев, без markdown-заборов, без текста вокруг.
 Экранируй только то, что требует JSON. Не экранируй `<`, `>` и обычные символы. Пути к файлам пиши как есть, обычно относительные от текущей папки.
+У тебя нет своей файловой системы: НЕ создавай файлы на своей стороне и НЕ давай ссылки вида get_source_file — файл появится только из этого вызова, с полным содержимым прямо в поле content.
+Если содержимое больше ~1500 символов, НЕ пиши его внутрь JSON: верни один забор \`\`\`html с полным документом и больше ничего — принимающая сторона сама превратит его в запись файла.
+Выполняй задание целиком: если в нём перечислены блоки, пункты или требования — сделай каждый, ничего не сокращая и не упрощая.
 Если действие не нужно (обычный вопрос, объяснение, болтовня) — просто отвечай текстом, инструменты не вызывай. Не выдумывай ссылки и содержимое файлов.
 
 Доступные действия:
@@ -123,7 +126,7 @@ function buildPrompt(body) {
 
   const sysRaw = systemToText(body.system).trim();
   const sysLimit = Math.min(config.maxSystemChars, Math.floor(headRoom * 0.6));
-  const sys = sysRaw ? clampMiddle(sysRaw, sysLimit) : '';
+  const sys = sysRaw && sysLimit > 0 ? clampMiddle(sysRaw, sysLimit) : '';
 
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const namesById = new Map();
@@ -373,6 +376,31 @@ function parseToolCall(text, toolNames) {
   return null;
 }
 
+/**
+ * Повторный запрос, когда ответ не годится: обрыв огромного JSON внутри tool_use
+ * или попытка сгенерировать файл на стороне Яндекса вместо вызова инструмента.
+ */
+function buildContinuation(body, partial, note) {
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const extra = [];
+  if (partial && partial.trim()) extra.push({ role: 'assistant', content: partial.slice(-8000) });
+  extra.push({
+    role: 'user',
+    content:
+      note ||
+      'Продолжи ровно с места обрыва. Не повторяй уже написанное, не начинай заново, без пояснений — только продолжение.',
+  });
+  return buildPrompt({ ...body, messages: [...messages, ...extra] });
+}
+
+/** Склеиваем продолжение, срезая нахлёст, если модель повторила хвост. */
+function joinContinuation(head, tail) {
+  const limit = Math.min(400, head.length, tail.length);
+  for (let k = limit; k > 0; k--) {
+    if (head.slice(-k) === tail.slice(0, k)) return head + tail.slice(k);
+  }
+  return head + tail;
+}
 const roughTokens = (text) => Math.max(1, Math.round(String(text || '').length / 3.5));
 
 function buildMessage({ model, text, stopReason = 'end_turn' }) {
@@ -496,10 +524,47 @@ class Sse {
   }
 }
 
+/**
+ * Алиса любит «сгенерировать файл» своим скиллом вместо вызова инструмента.
+ * Достаём готовый HTML из ответа (забор, питоновская строка или просто документ),
+ * чтобы отдать его как настоящий Write.
+ */
+function extractHtmlArtifact(text, fileName) {
+  if (typeof text !== 'string' || !text.trim()) return null;
+
+  const candidates = [
+    ...[...text.matchAll(/```[a-zA-Z0-9_-]*\s*\n?([\s\S]*?)```/g)].map((m) => m[1]),
+    ...[...text.matchAll(/[rR]?"""([\s\S]*?)"""/g)].map((m) => m[1]),
+    ...[...text.matchAll(/[rR]?'''([\s\S]*?)'''/g)].map((m) => m[1]),
+    text,
+  ];
+
+  for (const raw of candidates) {
+    const doc =
+      /<!DOCTYPE html[\s\S]*<\/html>/i.exec(raw) || /<html[\s>][\s\S]*<\/html>/i.exec(raw);
+    if (!doc) continue;
+    const html = doc[0].trim();
+    if (html.length < 200) continue;
+    return { file_path: fileName || 'index.html', content: html };
+  }
+
+  return null;
+}
+
+/** Имя файла, если пользователь его назвал. */
+function guessFileName(text) {
+  const m = /([\w.-]+\.html?)\b/i.exec(String(text || ''));
+  return m ? m[1] : null;
+}
+
 module.exports = {
   contentToText,
   systemToText,
   buildPrompt,
+  buildContinuation,
+  joinContinuation,
+  extractHtmlArtifact,
+  guessFileName,
   parseToolCall,
   buildMessage,
   buildToolMessage,
